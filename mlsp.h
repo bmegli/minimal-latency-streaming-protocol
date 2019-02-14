@@ -11,7 +11,7 @@ struct mlsp;
 
 struct mlsp_config
 {
-	const char *ip; // IP (send to or listen on) or NULL for server (listen on any)
+	const char *ip; // IP (send to or listen on) or NULL and "\0" for server (listen on any)
 	uint16_t port;
 	int timeout_ms; //0 ar positive number
 };

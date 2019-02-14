@@ -48,7 +48,6 @@ struct mlsp
 	struct mlsp_frame frame; //single user level packet
 };
 
-
 static struct mlsp *mlsp_init_common(const struct mlsp_config *config);
 static struct mlsp *mlsp_close_and_return_null(struct mlsp *m);
 static int mlsp_send_udp(struct mlsp *m, int data_size);
@@ -81,7 +80,7 @@ static struct mlsp *mlsp_init_common(const struct mlsp_config *config)
 	//if address was specified set it but don't forget to also:
 	//- check if address was specified for client
 	//- use INADDR_ANY if address was not specified for server
-	if (config->ip != NULL && !inet_pton(AF_INET, config->ip, &m->address_udp.sin_addr) )
+	if (config->ip != NULL && config->ip[0] != '\0' && !inet_pton(AF_INET, config->ip, &m->address_udp.sin_addr) )
 	{
 		fprintf(stderr, "mlsp: failed to initialize UDP address\n");
 		return mlsp_close_and_return_null(m);
@@ -98,7 +97,7 @@ struct mlsp *mlsp_init_client(const struct mlsp_config *config)
 	if(m == NULL)
 		return NULL;
 
-	if(config->ip == NULL)
+	if(config->ip == NULL || config->ip[0] == '\0')
 	{
 		fprintf(stderr, "mlsp: missing address argument for client\n");
 		return mlsp_close_and_return_null(m);
@@ -115,7 +114,7 @@ struct mlsp *mlsp_init_server(const struct mlsp_config *config)
 	if(m == NULL)
 		return NULL;
 
-	if(config->ip == NULL)
+	if(config->ip == NULL || config->ip[0] == '\0')
 		m->address_udp.sin_addr.s_addr = htonl(INADDR_ANY);
 
 	//set timeout if necessary
