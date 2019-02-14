@@ -69,7 +69,7 @@ while(keep_working)
 
 	if(streamer_frame == NULL)
 	{
-		if(error==MLSP_TIMEOUT)
+		if(error == MLSP_TIMEOUT)
 		{
 			//accept also new streaming sequence
 			mlsp_receive_reset(streamer);

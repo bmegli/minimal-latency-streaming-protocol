@@ -1,3 +1,14 @@
+/*
+ * MLSP Minimal Latency Streaming Protocol C library header
+ *
+ * Copyright 2019 (C) Bartosz Meglicki <meglickib@gmail.com>
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ */
+
 #ifndef MLSP_H
 #define MLSP_H
 
@@ -19,7 +30,7 @@ struct mlsp_config
 enum mlsp_retval_enum
 {
 	MLSP_TIMEOUT=-2, //!< timeout on receive
-	MLSP_ERROR=-1, //!< error occured 
+	MLSP_ERROR=-1, //!< error occured
 	MLSP_OK=0, //!< succesfull execution
 };
 
