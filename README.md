@@ -25,6 +25,8 @@ Working proof-of-concept.
 
 Currently whenever packet from frame N+1 arrives, data from frame N is discarded.
 
+Note that this library is intended for experiments. Everything is subject to change in long term.
+
 ## Using
 
 Error checking ommited for clarity.
