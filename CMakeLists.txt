@@ -4,7 +4,7 @@ project(
     mlsp
 )
 
-add_library(mlsp SHARED mlsp.c)
+add_library(mlsp STATIC mlsp.c)
 install(TARGETS mlsp DESTINATION lib)
 install(FILES mlsp.h DESTINATION include)
 
