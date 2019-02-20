@@ -34,8 +34,8 @@ enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8};
 struct mlsp_packet
 {
 	uint16_t framenumber;
-	uint16_t packets;
-	uint16_t packet;
+	uint16_t packets; //total packets in frame
+	uint16_t packet; //current packet
 	uint16_t size;
 	uint8_t *data;
 };
@@ -47,6 +47,7 @@ struct mlsp_collected_frame
 	uint8_t *data;
 	int actual_size;
 	int reserved_size;
+	int packets; //total packets in frame
 	int collected_packets;
 };
 
@@ -75,7 +76,7 @@ static struct mlsp *mlsp_init_common(const struct mlsp_config *config)
 		return NULL;
 	}
 
-	*m = zero_mlsp; //set all members of dynamically allocated struct to 0 in a portable way 	
+	*m = zero_mlsp; //set all members of dynamically allocated struct to 0 in a portable way
 
 	//create a UDP socket
 	if ( (m->socket_udp = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP) ) == -1)
@@ -132,7 +133,7 @@ struct mlsp *mlsp_init_server(const struct mlsp_config *config)
 	if(config->timeout_ms > 0)
 	{	//TODO - simplify
 		tv.tv_sec = config->timeout_ms / 1000;
-		tv.tv_usec = (config->timeout_ms-(config->timeout_ms/1000)*1000) * 1000;		
+		tv.tv_usec = (config->timeout_ms-(config->timeout_ms/1000)*1000) * 1000;
 
 		if (setsockopt(m->socket_udp, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0)
 		{
@@ -239,9 +240,15 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 		}
 
 		//frame switching
-		if(m->collected.framenumber < udp.framenumber || m->collected.data==NULL)
+		if(m->collected.framenumber < udp.framenumber || m->collected.data==NULL || m->collected.packets != udp.packets)
 			if( ( *error = mlsp_new_frame(m, &udp) ) != MLSP_OK)
 				return NULL;
+
+		if(udp.packet*PACKET_MAX_PAYLOAD + udp.size > m->collected.reserved_size)
+		{
+			fprintf(stderr, "mlsp: ignoring packet (would exceed buffer)\n");
+			continue;
+		}
 
 		memcpy(m->collected.data + udp.packet*PACKET_MAX_PAYLOAD, udp.data, udp.size);
 
@@ -282,6 +289,7 @@ static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *udp)
 {
 	m->collected.framenumber = udp->framenumber;
 	m->collected.actual_size = 0;
+	m->collected.packets = udp->packets;
 	m->collected.collected_packets = 0;
 
 	if(m->collected.reserved_size < udp->packets * PACKET_MAX_PAYLOAD)
