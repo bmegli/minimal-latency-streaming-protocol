@@ -19,6 +19,7 @@
 #include <netinet/in.h> //socaddr_in
 #include <arpa/inet.h> //inet_pton, etc
 
+#include <android/log.h>
 
 enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8};
 
@@ -241,9 +242,13 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 
 		//frame switching
 		if(m->collected.framenumber < udp.framenumber || m->collected.data==NULL || m->collected.packets != udp.packets)
+		{
+			if(m->collected.collected_packets < m->collected.packets)
+				__android_log_print(ANDROID_LOG_DEBUG, "mlsp", "skipping incomplete packet %d %d/%d\n", m->collected.framenumber, m->collected.collected_packets, m->collected.packets);		
+			
 			if( ( *error = mlsp_new_frame(m, &udp) ) != MLSP_OK)
 				return NULL;
-
+		}
 		if(udp.packet*PACKET_MAX_PAYLOAD + udp.size > m->collected.reserved_size)
 		{
 			fprintf(stderr, "mlsp: ignoring packet (would exceed buffer)\n");
