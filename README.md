@@ -1,7 +1,9 @@
 # MLSP Minimal Latency Streaming Protocol C library
 
 This library implements custom UDP protocol for streaming frame-like data spanning multiple MTUs.
-The assumption is that user is only interested in the latest data. 
+The assumption is that user is only interested in the latest data.
+
+See [hardware-video-streaming](https://github.com/bmegli/hardware-video-streaming) for other related projects.
 
 ## Purpose
 
