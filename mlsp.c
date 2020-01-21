@@ -257,7 +257,6 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 
 		if(m->collected.collected_packets == udp.packets)
 		{
-			printf("collected frame %d %d bytes of %d max\n", m->collected.framenumber, m->collected.actual_size, m->collected.reserved_size);
 			m->frame.framenumber = m->collected.framenumber;
 			m->frame.data=m->collected.data;
 			m->frame.size = m->collected.actual_size;
