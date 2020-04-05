@@ -18,6 +18,11 @@ extern "C" {
 
 #include <stdint.h>
 
+enum MLSP_COMPILE_TIME_CONSTANTS
+{
+	MLSP_MAX_SUBFRAMES = 3, //!< max number of logical subframes in a single MLSP frame
+};
+
 struct mlsp;
 
 struct mlsp_config
@@ -38,8 +43,8 @@ enum mlsp_retval_enum
 struct mlsp_frame
 {
 	uint16_t framenumber;
-	uint8_t *data;
-	int size;
+	uint8_t *data[MLSP_MAX_SUBFRAMES];
+	uint32_t size[MLSP_MAX_SUBFRAMES];
 };
 
 struct mlsp *mlsp_init_client(const struct mlsp_config *config);
