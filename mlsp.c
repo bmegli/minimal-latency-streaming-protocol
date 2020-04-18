@@ -218,8 +218,8 @@ int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
 		int offset = mlsp_encode_header(m, frame->framenumber, packets, p, size);
 
 		if(p == 0) //payload header is only in the first packet
-		{
-			offset += mlsp_encode_payload_header(m, frame, offset);
+		{	//use incremental or absolute offsets consistently
+			offset = mlsp_encode_payload_header(m, frame, offset);
 			size_left -= PAYLOAD_HEADER_SIZE;
 		}
 
