@@ -1,7 +1,7 @@
 /*
  * MLSP Minimal Latency Streaming Protocol C library header
  *
- * Copyright 2019 (C) Bartosz Meglicki <meglickib@gmail.com>
+ * Copyright 2019-2020 (C) Bartosz Meglicki <meglickib@gmail.com>
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -18,13 +18,18 @@ extern "C" {
 
 #include <stdint.h>
 
+enum MLSP_COMPILE_TIME_CONSTANTS
+{
+	MLSP_MAX_SUBFRAMES = 3, //!< max number of logical subframes in a single MLSP frame
+};
+
 struct mlsp;
 
 struct mlsp_config
 {
-	const char *ip; // IP (send to or listen on) or NULL and "\0" for server (listen on any)
-	uint16_t port;
-	int timeout_ms; //0 ar positive number
+	const char *ip; //!< IP (send to or listen on) or NULL and "\0" for server (listen on any)
+	uint16_t port; //!< port to listen on (server) or send to (client)
+	int timeout_ms; //!< 0 or positive number of ms
 };
 
 enum mlsp_retval_enum
@@ -38,8 +43,8 @@ enum mlsp_retval_enum
 struct mlsp_frame
 {
 	uint16_t framenumber;
-	uint8_t *data;
-	int size;
+	uint8_t *data[MLSP_MAX_SUBFRAMES];
+	uint32_t size[MLSP_MAX_SUBFRAMES];
 };
 
 struct mlsp *mlsp_init_client(const struct mlsp_config *config);
