@@ -9,6 +9,7 @@ See [hardware-video-streaming](https://github.com/bmegli/hardware-video-streamin
 
 - minimize latency
 - no buffering
+- avoid data copies
 - private experiments
 
 The only buffering that is allowed is natural arising from sequece:
@@ -20,14 +21,16 @@ The only buffering that is allowed is natural arising from sequece:
 
 Unix-like systems (due to network implementation, can be easily made cross-platform).
 
-
 ## State
 
 Working proof-of-concept. 
 
 Currently whenever packet from frame N+1 arrives, data from frame N is discarded.
 
-Note that this library is intended for experiments. Everything is subject to change in long term.
+Notes:
+- library is intended for experiments
+- everything is subject to change in the long term
+- compatibility is not guaranteed between different commits
 
 ## Using
 
@@ -43,12 +46,20 @@ streamer=mlsp_init_client(&streamer_config);
 
 while(keep_working)
 {
+	struct mlsp_frame network_frame = {0};
+
 	//...
-	//prepare your date in some way
+	//prepare your data in some way
 	//...
 
-	//here passing only pointer to framedata, no copies are needed
-	mlsp_frame frame={ frame_number, framedata, framedata_size};
+	//each sent frame should be identified with increasing frame number
+	network_frame.framenumber = your_framenumber;
+
+	//MLSP frame may carry multiple logical subframes
+	//typically only single subframe is used (index 0)
+	network_frame.data[0] = your_data_pointer;
+	network_frame.size[0] = your_data_size;
+
 	mlsp_send(streamer, &frame)
 }
 
@@ -85,7 +96,6 @@ while(keep_working)
 	//do something with the streamer_frame
 	//the ownership remains with library so consume or copy
 	//...
-	
 }
 
 mlsp_close(streamer);

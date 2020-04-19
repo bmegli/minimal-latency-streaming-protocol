@@ -1,7 +1,7 @@
 /*
  * MLSP Minimal Latency Streaming Protocol C library implementation
  *
- * Copyright 2019 (C) Bartosz Meglicki <meglickib@gmail.com>
+ * Copyright 2019-2020 (C) Bartosz Meglicki <meglickib@gmail.com>
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -22,12 +22,20 @@
 
 enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8, PAYLOAD_HEADER_SIZE=MLSP_MAX_SUBFRAMES*4};
 
+//some higher level libraries may have optimized routines
+//with reads exceeding end of buffer
+//e.g. see FFmpeg AV_INPUT_BUFFER_PADDING_SIZE
+//this constant allows reserving larger buffer for such case
+//this means that the library user may consume
+//library data without copying it even in such case
+enum {BUFFER_PADDING_SIZE = 32};
+
 /* packet structure
 	u16 framenumber
 	u16 packets
 	u16 packet
 	u16 size
-	u8[size] data
+	u8[size] payload data
 */
 
 /* data structure (payload)
@@ -48,7 +56,6 @@ enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8, PAYLOAD_HEADER_SIZE=MLSP_MA
  * - but the cost is not paid on packet level, only once on frame level
  * - it may be optimized later (e.g. no or minimal cost paid for single subframe, etc)
  */
-
 
 //library level packet
 struct mlsp_packet
@@ -193,7 +200,14 @@ static struct mlsp *mlsp_close_and_return_null(struct mlsp *m)
 	return NULL;
 }
 
-
+//the complexity of implementation stems from the facts:
+//- library allows specyfing pointers to multiple subframe data
+//- in such case we avoid copying subframes into new buffer "in preparation"
+//- but instead pacektize them to MTUs as we are sending data
+//this is important only if we are sending large amounts of data
+//(which is the design goal and original intention behind library development)
+//
+//TODO - nontheless simplify implementation (keeping the functionality)
 int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
 {
 	uint32_t payload = PAYLOAD_HEADER_SIZE;
@@ -203,11 +217,11 @@ int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
 
 	//if size is not divisible by MAX_PAYLOAD we have additional packet with the rest
 	const uint16_t packets = payload / PACKET_MAX_PAYLOAD + ((payload % PACKET_MAX_PAYLOAD) != 0);
-	//last packet is smaller unless it is exactly MAX_PAYLOAD siz
+	//last packet is smaller unless it is exactly MAX_PAYLOAD size
 	const uint16_t last_packet_size = ((payload % PACKET_MAX_PAYLOAD) !=0 ) ? payload % PACKET_MAX_PAYLOAD : PACKET_MAX_PAYLOAD;
 
-	int sub=0;
-	int sub_copied=0;
+	int sub = 0;
+	int sub_copied = 0;
 
 	for(uint16_t p=0;p<packets;++p)
 	{
@@ -218,8 +232,8 @@ int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
 		int offset = mlsp_encode_header(m, frame->framenumber, packets, p, size);
 
 		if(p == 0) //payload header is only in the first packet
-		{	//use incremental or absolute offsets consistently
-			offset = mlsp_encode_payload_header(m, frame, offset);
+		{
+			offset += mlsp_encode_payload_header(m, frame, offset);
 			size_left -= PAYLOAD_HEADER_SIZE;
 		}
 
@@ -247,8 +261,8 @@ int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
 
 		if( mlsp_send_udp(m, size + PACKET_HEADER_SIZE) != MLSP_OK )
 			return MLSP_ERROR;
-		//temp
-		printf("mlsp: sent %d bytes\n", size + PACKET_HEADER_SIZE);
+
+		//printf("mlsp: sent %d bytes\n", size + PACKET_HEADER_SIZE);
 	}
 
 	return MLSP_OK;
@@ -269,7 +283,7 @@ static int mlsp_encode_payload_header(struct mlsp *m, const struct mlsp_frame *f
 	for(int i=0;i<MLSP_MAX_SUBFRAMES;++i, offset+=sizeof(frame->size[0]))
 		memcpy(m->data+offset, &frame->size[i], sizeof(frame->size[0]));
 
-	return offset;
+	return PAYLOAD_HEADER_SIZE;
 }
 static int mlsp_send_udp(struct mlsp *m, int data_size)
 {
@@ -404,7 +418,7 @@ static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *udp)
 	if(m->collected.reserved_size < udp->packets * PACKET_MAX_PAYLOAD)
 	{
 		free(m->collected.data);
-		if ( (m->collected.data = malloc ( udp->packets * PACKET_MAX_PAYLOAD ) ) == NULL)
+		if ( (m->collected.data = malloc ( udp->packets * PACKET_MAX_PAYLOAD + BUFFER_PADDING_SIZE ) ) == NULL)
 		{
 			fprintf(stderr, "mlsp: not enough memory for frame\n");
 			return MLSP_ERROR;
