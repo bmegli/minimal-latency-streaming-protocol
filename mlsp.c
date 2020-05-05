@@ -76,6 +76,8 @@ struct mlsp_collected_frame
 	int reserved_size;
 	int packets; //total packets in frame
 	int collected_packets;
+	uint8_t *received_packets;
+	int received_packets_size;
 };
 
 struct mlsp
@@ -190,7 +192,7 @@ void mlsp_close(struct mlsp *m)
 		fprintf(stderr, "mlsp: error while closing socket\n");
 
 	free(m->collected.data);
-
+	free(m->collected.received_packets);
 	free(m);
 }
 
@@ -325,6 +327,12 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 			continue;
 		}
 
+		if(udp.framenumber < m->collected.framenumber)
+		{
+			fprintf(stderr, "mlsp: ignoring packet with older framenumber\n");
+			continue;
+		}
+
 		//frame switching
 		if(m->collected.framenumber < udp.framenumber || m->collected.data==NULL || m->collected.packets != udp.packets)
 			if( ( *error = mlsp_new_frame(m, &udp) ) != MLSP_OK)
@@ -335,6 +343,14 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 			fprintf(stderr, "mlsp: ignoring packet (would exceed buffer)\n");
 			continue;
 		}
+
+		if(m->collected.received_packets[udp.packet])
+		{
+			fprintf(stderr, "mlsp: ignoring packeet (duplicate)\n");
+			continue;
+		}
+
+		m->collected.received_packets[udp.packet] = 1;
 
 		memcpy(m->collected.data + udp.packet*PACKET_MAX_PAYLOAD, udp.data, udp.size);
 
@@ -375,6 +391,12 @@ static int mlsp_decode_header(struct mlsp_packet *udp, uint8_t *data, int size)
 		return MLSP_ERROR;
 	}
 
+	if(udp->packet >= udp->packets)
+	{
+		fprintf(stderr, "mlsp: decoded packet would exceed frame packets\n");
+		return MLSP_ERROR;
+	}
+
 	udp->data=data+PACKET_HEADER_SIZE;
 	return MLSP_OK;
 }
@@ -410,6 +432,14 @@ static int mlsp_decode_payload(const struct mlsp_collected_frame *collected, str
 
 static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *udp)
 {
+	if(m->collected.framenumber && m->collected.packets != m->collected.collected_packets)
+	{
+		fprintf(stderr, "mlsp: ignoring incomplete frame: %d/%d\n", m->collected.collected_packets, m->collected.packets);
+		for(int i=0;i<m->collected.packets;++i)
+			fprintf(stderr, "%d", m->collected.received_packets[i]);
+		fprintf(stderr, "\n");
+	}
+
 	m->collected.framenumber = udp->framenumber;
 	m->collected.actual_size = 0;
 	m->collected.packets = udp->packets;
@@ -426,6 +456,19 @@ static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *udp)
 		m->collected.reserved_size = udp->packets * PACKET_MAX_PAYLOAD;
 	}
 
+	if(m->collected.received_packets_size < udp->packets)
+	{
+		free(m->collected.received_packets);
+		if ( (m->collected.received_packets = malloc ( udp->packets) ) == NULL )
+		{
+			fprintf(stderr, "mlsp: not enough memory for recevied frame packets flags\n");
+			return MLSP_ERROR;
+		}
+		m->collected.received_packets_size = udp->packets;
+	}
+
+	memset(m->collected.received_packets, 0, udp->packets);
+
 	return MLSP_OK;
 }
 void mlsp_receive_reset(struct mlsp *m)
@@ -433,4 +476,6 @@ void mlsp_receive_reset(struct mlsp *m)
 	m->collected.framenumber = 0;
 	m->collected.actual_size = 0;
 	m->collected.collected_packets = 0;
+	if(m->collected.received_packets)
+		memset(m->collected.received_packets, 0, m->collected.received_packets_size);
 }
