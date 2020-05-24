@@ -131,7 +131,6 @@ static struct mlsp *mlsp_init_common(const struct mlsp_config *config)
 	}
 
 	return m;
-
 }
 
 struct mlsp *mlsp_init_client(const struct mlsp_config *config)
@@ -146,7 +145,7 @@ struct mlsp *mlsp_init_client(const struct mlsp_config *config)
 		fprintf(stderr, "mlsp: missing address argument for client\n");
 		return mlsp_close_and_return_null(m);
 	}
-
+		
 	return m;
 }
 
@@ -179,6 +178,21 @@ struct mlsp *mlsp_init_server(const struct mlsp_config *config)
 		fprintf(stderr, "mlsp: failed to bind socket to address\n");
 		return mlsp_close_and_return_null(m);
 	}
+
+	int rx_size;
+	socklen_t len = sizeof(rx_size);
+
+	if (getsockopt(m->socket_udp, SOL_SOCKET, SO_RCVBUF, &rx_size, &len) == 0 )
+		fprintf(stderr, "mlsp: SO_RCV_BUF is %d\n", rx_size);		
+
+
+	rx_size = 212992 *10;
+/*
+	if(setsockopt(m->socket_udp, SOL_SOCKET, SO_RCVBUF, &rx_size, sizeof(rx_size)) == -1)
+		fprintf(stderr, "mlsp: failed to set SO_RCV_BUF\n");
+*/
+	if (getsockopt(m->socket_udp, SOL_SOCKET, SO_RCVBUF, &rx_size, &len) == 0 )
+		fprintf(stderr, "mlsp: SO_RCV_BUF set to %d\n", rx_size);		
 
 	return m;
 }
