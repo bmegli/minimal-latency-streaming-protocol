@@ -19,6 +19,8 @@
 #include <netinet/in.h> //socaddr_in
 #include <arpa/inet.h> //inet_pton, etc
 
+//benchmark related
+#include <time.h> //clock_gettime
 
 enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8, PAYLOAD_HEADER_SIZE=MLSP_MAX_SUBFRAMES*4};
 
@@ -78,6 +80,7 @@ struct mlsp_collected_frame
 	int collected_packets;
 	uint8_t *received_packets;
 	int received_packets_size;
+	struct timespec start, end;
 };
 
 struct mlsp
@@ -360,8 +363,12 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 		if(m->collected.collected_packets == udp.packets)
 		{
 			if(mlsp_decode_payload(&m->collected, &m->frame) == MLSP_OK)
+			{
+				clock_gettime(CLOCK_MONOTONIC_RAW, &m->collected.end);
+				double receive_ms = (m->collected.end.tv_nsec - m->collected.start.tv_nsec) / 1000000.0;
+				printf("received in %f ms (%d bytes)\n", receive_ms, m->collected.actual_size);
 				return &m->frame;
-
+			}
 			//we collected mallformed packet, reset the receiver
 			mlsp_receive_reset(m);
 		}
@@ -444,6 +451,8 @@ static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *udp)
 	m->collected.actual_size = 0;
 	m->collected.packets = udp->packets;
 	m->collected.collected_packets = 0;
+
+	clock_gettime(CLOCK_MONOTONIC_RAW, &m->collected.start);
 
 	if(m->collected.reserved_size < udp->packets * PACKET_MAX_PAYLOAD)
 	{
