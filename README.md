@@ -101,4 +101,7 @@ while(keep_working)
 mlsp_close(streamer);
 ```
 
+## Library uses
 
+Multi-frame streaming client - [NHVE Network Hardware Video Encoder](https://github.com/bmegli/network-hardware-video-encoder/tree/master)\
+Multi-frame streaming server - [NHVD Network Hardware Video Decoder](https://github.com/bmegli/network-hardware-video-decoder/tree/master)
