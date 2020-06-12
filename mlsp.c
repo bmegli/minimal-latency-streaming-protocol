@@ -294,9 +294,13 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 		{
 			m->received_subframes[udp.subframe] = 1;
 
+			int received = 0;
+
 			for(int i=0;i<udp.subframes;++i)
-				if(!m->received_subframes[i])
-					continue;
+				received += m->received_subframes[i];
+
+			if(received != udp.subframes)
+				continue;
 			
 			mlsp_decode_payload(m, &udp, &m->frame);
 			
