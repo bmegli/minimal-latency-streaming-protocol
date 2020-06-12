@@ -280,7 +280,7 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 
 		if(collected->received_packets[udp.packet])
 		{
-			fprintf(stderr, "mlsp: ignoring packeet (duplicate)\n");
+			fprintf(stderr, "mlsp: ignoring packet (duplicate)\n");
 			continue;
 		}
 
@@ -321,6 +321,8 @@ static int mlsp_decode_header(struct mlsp *m, int size, struct mlsp_packet *udp)
 	udp->subframe = data[3];
 	memcpy(&udp->packets, data+4, sizeof(udp->packets));
 	memcpy(&udp->packet, data+6, sizeof(udp->packet));
+
+	udp->size = size - PACKET_HEADER_SIZE;
 	
 	if(udp->size > PACKET_MAX_PAYLOAD)
 	{
