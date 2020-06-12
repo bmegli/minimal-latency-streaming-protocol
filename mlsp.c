@@ -77,7 +77,7 @@ struct mlsp
 static struct mlsp *mlsp_init_common(const struct mlsp_config *config);
 static struct mlsp *mlsp_close_and_return_null(struct mlsp *m);
 static int mlsp_send_udp(struct mlsp *m, int data_size);
-static int mlsp_decode_header(struct mlsp *m, int size, struct mlsp_packet *udp);
+static int mlsp_decode_header(const struct mlsp *m, int size, struct mlsp_packet *udp);
 static void mlsp_decode_payload(const struct mlsp *m, const struct mlsp_packet *udp,
                                 struct mlsp_frame *frame);
 static void mlsp_new_frame(struct mlsp *m, uint16_t framenumber);
@@ -271,7 +271,7 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 		
 		if(m->framenumber < udp.framenumber)
 			mlsp_new_frame(m, udp.framenumber);
-					
+
 		struct mlsp_collected_frame *collected = &m->collected[udp.subframe];
 		
 		if( collected->data == NULL || collected->packets != udp.packets)
@@ -285,7 +285,6 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 		}
 
 		collected->received_packets[udp.packet] = 1;
-
 		memcpy(collected->data + udp.packet*PACKET_MAX_PAYLOAD, udp.data, udp.size);
 
 		++collected->collected_packets;
@@ -306,7 +305,7 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 	}
 }
 
-static int mlsp_decode_header(struct mlsp *m, int size, struct mlsp_packet *udp)
+static int mlsp_decode_header(const struct mlsp *m, int size, struct mlsp_packet *udp)
 {
 	uint8_t *data = m->data;
 	
@@ -371,13 +370,14 @@ static void mlsp_decode_payload(const struct mlsp *m, const struct mlsp_packet *
 }
 
 static void mlsp_new_frame(struct mlsp *m, uint16_t framenumber)
-{	
+{
 	if(m->framenumber)
-		for(int s=0;s<m->subframes;++m)
+		for(int s=0;s<m->subframes;++s)
 			if(!m->received_subframes[s])
 			{
 				fprintf(stderr, "mlsp: ignoring incomplete frame %d/%d: %d/%d\n", framenumber, s,
 				m->collected[s].collected_packets, m->collected[s].packets);
+
 				for(int i=0;i<m->collected[s].packets;++i)
 					fprintf(stderr, "%d", m->collected[s].received_packets[i]);
 				fprintf(stderr, "\n");
@@ -385,14 +385,15 @@ static void mlsp_new_frame(struct mlsp *m, uint16_t framenumber)
 	
 	m->framenumber = framenumber;
 	memset(m->received_subframes, 0, MLSP_MAX_SUBFRAMES);
-	
-	//clear frame and subframes meta-data
+
 	for(int s=0;s<m->subframes;++s)
 	{
 		m->collected[s].actual_size = 0;
 		m->collected[s].packets = 0;
 		m->collected[s].collected_packets = 0;
-		memset(m->collected[s].received_packets, 0, m->collected[s].received_packets_size);
+
+		if(m->collected[s].received_packets)
+			memset(m->collected[s].received_packets, 0, m->collected[s].received_packets_size);
 	}
 }
 
