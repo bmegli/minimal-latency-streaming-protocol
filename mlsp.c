@@ -19,8 +19,7 @@
 #include <netinet/in.h> //socaddr_in
 #include <arpa/inet.h> //inet_pton, etc
 
-
-enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8, PAYLOAD_HEADER_SIZE=MLSP_MAX_SUBFRAMES*4};
+enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8};
 
 //some higher level libraries may have optimized routines
 //with reads exceeding end of buffer
@@ -31,52 +30,35 @@ enum {PACKET_MAX_PAYLOAD=1400, PACKET_HEADER_SIZE=8, PAYLOAD_HEADER_SIZE=MLSP_MA
 enum {BUFFER_PADDING_SIZE = 32};
 
 /* packet structure
-	u16 framenumber
-	u16 packets
-	u16 packet
-	u16 size
-	u8[size] payload data
-*/
-
-/* data structure (payload)
- * u32 subframe1_size
- * u32 subframe2_size
- * ...
- * u32 subframe_MLSP_MAX_SUBFRAMES_size
- * subframe_1 data
- * subframe_2 data
- * ...
- * subframe_MLSP_MAX_SUBFRAMES_data
-/*
-
-/* Subframes overhead
- * - MLSP_MAX_SUBFRAMES * 4 bytes (e.g. 12 bytes for 3 subframes)
- * - on frame level
- * - each frame payload usually spans over multiple packets
- * - but the cost is not paid on packet level, only once on frame level
- * - it may be optimized later (e.g. no or minimal cost paid for single subframe, etc)
+ * u16 framenumber
+ * u8 subframes
+ * u8 subframe
+ * u16 packets
+ * u16 packet
+ * u8[] payload data
  */
 
 //library level packet
 struct mlsp_packet
 {
 	uint16_t framenumber;
+	uint8_t subframes; //total subframes in frame
+	uint8_t subframe; //current subframe
 	uint16_t packets; //total packets in frame
 	uint16_t packet; //current packet
-	uint16_t size;
 	uint8_t *data;
+	uint16_t size; //data size, not in protocol
 };
 
-//frame during collection
+//subframe during collection
 struct mlsp_collected_frame
 {
-	uint16_t framenumber;
 	uint8_t *data;
 	int actual_size;
 	int reserved_size;
 	int packets; //total packets in frame
 	int collected_packets;
-	uint8_t *received_packets;
+	uint8_t *received_packets; //flags received packets
 	int received_packets_size;
 };
 
@@ -84,24 +66,33 @@ struct mlsp
 {
 	int socket_udp;
 	struct sockaddr_in address_udp;
+	int subframes; //number of logical subframes in frame
+	uint16_t framenumber; //currently assembled frame framenumber
 	uint8_t data[PACKET_HEADER_SIZE + PACKET_MAX_PAYLOAD]; //single library level packet
-	struct mlsp_collected_frame collected; //frame during collection
+	struct mlsp_collected_frame collected[MLSP_MAX_SUBFRAMES]; //frame during collection
+	uint8_t received_subframes[MLSP_MAX_SUBFRAMES]; //flags received subframes
 	struct mlsp_frame frame; //single user level packet
 };
 
 static struct mlsp *mlsp_init_common(const struct mlsp_config *config);
 static struct mlsp *mlsp_close_and_return_null(struct mlsp *m);
-static int mlsp_encode_header(struct mlsp *m, uint16_t framenumber, uint16_t packets, uint16_t packet_number, uint16_t packet_size);
-static int mlsp_encode_payload_header(struct mlsp *m, const struct mlsp_frame *frame, int offset);
 static int mlsp_send_udp(struct mlsp *m, int data_size);
-static int mlsp_decode_header(struct mlsp_packet *udp, uint8_t *data, int size);
-static int mlsp_decode_payload(const struct mlsp_collected_frame *collected, struct mlsp_frame *frame);
-static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *packet);
+static int mlsp_decode_header(struct mlsp *m, int size, struct mlsp_packet *udp);
+static void mlsp_decode_payload(const struct mlsp *m, const struct mlsp_packet *udp,
+                                struct mlsp_frame *frame);
+static void mlsp_new_frame(struct mlsp *m, uint16_t framenumber);
+static int mlsp_new_subframe(struct mlsp_collected_frame *collected, struct mlsp_packet *udp);
 
 static struct mlsp *mlsp_init_common(const struct mlsp_config *config)
 {
 	struct mlsp *m, zero_mlsp = {0};
 
+	if(config->subframes > MLSP_MAX_SUBFRAMES)
+	{
+		fprintf(stderr, "mlsp: the maximum number of subframes (compile time) exceed\n");
+		return NULL;
+	}
+	
 	if( ( m = (struct mlsp*)malloc(sizeof(struct mlsp))) == NULL )
 	{
 		fprintf(stderr, "mlsp: not enough memory for mlsp\n");
@@ -109,7 +100,8 @@ static struct mlsp *mlsp_init_common(const struct mlsp_config *config)
 	}
 
 	*m = zero_mlsp; //set all members of dynamically allocated struct to 0 in a portable way
-
+	m->subframes = config->subframes > 0 ? config->subframes : 1;
+	
 	//create a UDP socket
 	if ( (m->socket_udp = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP) ) == -1)
 	{
@@ -131,12 +123,11 @@ static struct mlsp *mlsp_init_common(const struct mlsp_config *config)
 	}
 
 	return m;
-
 }
 
 struct mlsp *mlsp_init_client(const struct mlsp_config *config)
 {
-	struct mlsp *m=mlsp_init_common(config);
+	struct mlsp *m = mlsp_init_common(config);
 
 	if(m == NULL)
 		return NULL;
@@ -191,8 +182,11 @@ void mlsp_close(struct mlsp *m)
 	if(close(m->socket_udp) == -1)
 		fprintf(stderr, "mlsp: error while closing socket\n");
 
-	free(m->collected.data);
-	free(m->collected.received_packets);
+	for(int i=0;i<m->subframes;++i)
+	{
+		free(m->collected[i].data);
+		free(m->collected[i].received_packets);
+	}
 	free(m);
 }
 
@@ -202,91 +196,42 @@ static struct mlsp *mlsp_close_and_return_null(struct mlsp *m)
 	return NULL;
 }
 
-//the complexity of implementation stems from the facts:
-//- library allows specyfing pointers to multiple subframe data
-//- in such case we avoid copying subframes into new buffer "in preparation"
-//- but instead pacektize them to MTUs as we are sending data
-//this is important only if we are sending large amounts of data
-//(which is the design goal and original intention behind library development)
-//
-//TODO - nontheless simplify implementation (keeping the functionality)
-int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
+int mlsp_send_subframe(struct mlsp *m, uint16_t framenumber, uint8_t subframe, const uint8_t *data, uint32_t data_size)
 {
-	uint32_t payload = PAYLOAD_HEADER_SIZE;
-
-	for(int i=0;i<MLSP_MAX_SUBFRAMES;++i)
-		payload += frame->size[i];
-
 	//if size is not divisible by MAX_PAYLOAD we have additional packet with the rest
-	const uint16_t packets = payload / PACKET_MAX_PAYLOAD + ((payload % PACKET_MAX_PAYLOAD) != 0);
+	const uint16_t packets = data_size / PACKET_MAX_PAYLOAD + ((data_size % PACKET_MAX_PAYLOAD) != 0);
 	//last packet is smaller unless it is exactly MAX_PAYLOAD size
-	const uint16_t last_packet_size = ((payload % PACKET_MAX_PAYLOAD) !=0 ) ? payload % PACKET_MAX_PAYLOAD : PACKET_MAX_PAYLOAD;
-
-	int sub = 0;
-	int sub_copied = 0;
+	const uint16_t last_packet_size = ((data_size % PACKET_MAX_PAYLOAD) !=0 ) ? data_size % PACKET_MAX_PAYLOAD : PACKET_MAX_PAYLOAD;
 
 	for(uint16_t p=0;p<packets;++p)
 	{
-		//last packet may be smaller
+		//encode header
+		memcpy(m->data, &framenumber, sizeof(framenumber));
+		m->data[2] = m->subframes;
+		m->data[3] = subframe;
+		memcpy(m->data+4, &packets, sizeof(packets));
+		memcpy(m->data+6, &p, sizeof(p));
+		
+		//encode payload, last packet may be smaller
 		uint16_t size = (p < packets-1) ? PACKET_MAX_PAYLOAD : last_packet_size;
-		uint16_t size_left = size;
-
-		int offset = mlsp_encode_header(m, frame->framenumber, packets, p, size);
-
-		if(p == 0) //payload header is only in the first packet
-		{
-			offset += mlsp_encode_payload_header(m, frame, offset);
-			size_left -= PAYLOAD_HEADER_SIZE;
-		}
-
-		//keep on copying data until there is place
-		for(;sub < MLSP_MAX_SUBFRAMES; )
-		{
-			int sub_left = frame->size[sub] - sub_copied;
-
-			//more data left in current subframe than in packet, copy and send
-			if(sub_left > size_left)
-			{
-				memcpy(m->data+offset, frame->data[sub]+sub_copied, size_left);
-				sub_copied += size_left;
-				offset += size_left;
-				size_left = 0;
-				break;
-			}
-			//otherwise copy everything left and keep copying from next subframes
-			memcpy(m->data+offset, frame->data[sub]+sub_copied, sub_left);
-			size_left -= sub_left;
-			offset += sub_left;
-			sub_copied = 0;
-			++sub;
-		}
+		memcpy(m->data+8, data + p * PACKET_MAX_PAYLOAD, size);
 
 		if( mlsp_send_udp(m, size + PACKET_HEADER_SIZE) != MLSP_OK )
 			return MLSP_ERROR;
-
-		//printf("mlsp: sent %d bytes\n", size + PACKET_HEADER_SIZE);
 	}
 
+	return MLSP_OK;	
+}
+
+int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
+{
+	for(int i = 0;i<m->subframes;++i)
+		if( mlsp_send_subframe(m, frame->framenumber, i, frame->data[i], frame->size[i]) != MLSP_OK )
+			return MLSP_ERROR;
+	
 	return MLSP_OK;
 }
 
-static int mlsp_encode_header(struct mlsp *m, uint16_t framenumber, uint16_t packets, uint16_t packet_number, uint16_t packet_size)
-{
-	memcpy(m->data, &framenumber, sizeof(framenumber));
-	memcpy(m->data+2, &packets, sizeof(packets));
-	memcpy(m->data+4, &packet_number, sizeof(packet_number));
-	memcpy(m->data+6, &packet_size, sizeof(packet_size));
-	return PACKET_HEADER_SIZE;
-}
-
-static int mlsp_encode_payload_header(struct mlsp *m, const struct mlsp_frame *frame, int offset)
-{
-	//encode subframe sizes
-	for(int i=0;i<MLSP_MAX_SUBFRAMES;++i, offset+=sizeof(frame->size[0]))
-		memcpy(m->data+offset, &frame->size[i], sizeof(frame->size[0]));
-
-	return PAYLOAD_HEADER_SIZE;
-}
 static int mlsp_send_udp(struct mlsp *m, int data_size)
 {
 	int result;
@@ -321,73 +266,71 @@ struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 			return NULL;
 		}
 
-		if(mlsp_decode_header(&udp, m->data, recv_len) != MLSP_OK)
-		{
-			fprintf(stderr, "mlsp: ignoring malformed packet\n");
+		if(mlsp_decode_header(m, recv_len, &udp) != MLSP_OK)
 			continue;
-		}
-
-		if(udp.framenumber < m->collected.framenumber)
-		{
-			fprintf(stderr, "mlsp: ignoring packet with older framenumber\n");
-			continue;
-		}
-
-		//frame switching
-		if(m->collected.framenumber < udp.framenumber || m->collected.data==NULL || m->collected.packets != udp.packets)
-			if( ( *error = mlsp_new_frame(m, &udp) ) != MLSP_OK)
+		
+		if(m->framenumber < udp.framenumber)
+			mlsp_new_frame(m, udp.framenumber);
+					
+		struct mlsp_collected_frame *collected = &m->collected[udp.subframe];
+		
+		if( collected->data == NULL || collected->packets != udp.packets)
+			if( ( *error = mlsp_new_subframe(collected, &udp) ) != MLSP_OK)
 				return NULL;
 
-		if(udp.packet*PACKET_MAX_PAYLOAD + udp.size > m->collected.reserved_size)
-		{
-			fprintf(stderr, "mlsp: ignoring packet (would exceed buffer)\n");
-			continue;
-		}
-
-		if(m->collected.received_packets[udp.packet])
+		if(collected->received_packets[udp.packet])
 		{
 			fprintf(stderr, "mlsp: ignoring packeet (duplicate)\n");
 			continue;
 		}
 
-		m->collected.received_packets[udp.packet] = 1;
+		collected->received_packets[udp.packet] = 1;
 
-		memcpy(m->collected.data + udp.packet*PACKET_MAX_PAYLOAD, udp.data, udp.size);
+		memcpy(collected->data + udp.packet*PACKET_MAX_PAYLOAD, udp.data, udp.size);
 
-		++m->collected.collected_packets;
-		m->collected.actual_size += udp.size;
+		++collected->collected_packets;
+		collected->actual_size += udp.size;
 
-		if(m->collected.collected_packets == udp.packets)
+		if(collected->collected_packets == udp.packets)
 		{
-			if(mlsp_decode_payload(&m->collected, &m->frame) == MLSP_OK)
-				return &m->frame;
+			m->received_subframes[udp.subframe] = 1;
 
-			//we collected mallformed packet, reset the receiver
-			mlsp_receive_reset(m);
+			for(int i=0;i<udp.subframes;++i)
+				if(!m->received_subframes[i])
+					continue;
+			
+			mlsp_decode_payload(m, &udp, &m->frame);
+			
+			return &m->frame;
 		}
 	}
 }
 
-static int mlsp_decode_header(struct mlsp_packet *udp, uint8_t *data, int size)
+static int mlsp_decode_header(struct mlsp *m, int size, struct mlsp_packet *udp)
 {
-	if(size < 8)
+	uint8_t *data = m->data;
+	
+	if(size < PACKET_HEADER_SIZE)
 	{
 		fprintf(stderr, "mlsp: packet size smaller than MLSP header\n");
 		return MLSP_ERROR;
 	}
+	
 	memcpy(&udp->framenumber, data, sizeof(udp->framenumber));
-	memcpy(&udp->packets, data+2, sizeof(udp->packets));
-	memcpy(&udp->packet, data+4, sizeof(udp->packet));
-	memcpy(&udp->size, data+6, sizeof(udp->size));
-
-	if(size - PACKET_HEADER_SIZE > PACKET_MAX_PAYLOAD)
+	udp->subframes = data[2];
+	udp->subframe = data[3];
+	memcpy(&udp->packets, data+4, sizeof(udp->packets));
+	memcpy(&udp->packet, data+6, sizeof(udp->packet));
+	
+	if(udp->size > PACKET_MAX_PAYLOAD)
 	{
 		fprintf(stderr, "mlsp: packet paylod size would exceed max paylod\n");
 		return MLSP_ERROR;
 	}
-	if(size - PACKET_HEADER_SIZE != udp->size)
+
+	if(udp->subframe >= udp->subframes)
 	{
-		fprintf(stderr, "mlsp: decoded paylod size doesn't match received packet size\n");
+		fprintf(stderr, "mlsp: decoded packet would exceed frame subframes\n");
 		return MLSP_ERROR;
 	}
 
@@ -397,85 +340,94 @@ static int mlsp_decode_header(struct mlsp_packet *udp, uint8_t *data, int size)
 		return MLSP_ERROR;
 	}
 
-	udp->data=data+PACKET_HEADER_SIZE;
-	return MLSP_OK;
-}
-
-static int mlsp_decode_payload(const struct mlsp_collected_frame *collected, struct mlsp_frame *frame)
-{
-	const int SINGLE_SIZE = sizeof(frame->size[0]);
-	int offset = PAYLOAD_HEADER_SIZE;
-
-	if(collected->actual_size < PAYLOAD_HEADER_SIZE)
+	if(udp->framenumber < m->framenumber)
 	{
-		fprintf(stderr, "mlsp: decoded payload size smaller than MLSP payload header\n");
+		fprintf(stderr, "mlsp: ignoring packet with older framenumber\n");
+		return MLSP_ERROR;
+	}
+	
+	if(udp->subframes >= m->subframes || udp->subframe >= m->subframes)
+	{
+		fprintf(stderr, "mlsp: ignoring packet with incorrect subframe(s)\n");
 		return MLSP_ERROR;
 	}
 
-	frame->framenumber = collected->framenumber;
-
-	for(int i=0;i<MLSP_MAX_SUBFRAMES;++i)
-	{
-		memcpy(&frame->size[i], collected->data + i * SINGLE_SIZE, SINGLE_SIZE);
-		frame->data[i] = collected->data + offset;
-		offset += frame->size[i];
-	}
-
-	if(offset != collected->actual_size)
-	{
-		fprintf(stderr, "mlsp: payload frames size with header doesn't match encoded size\n");
-		return MLSP_ERROR;
-	}
-
+	udp->data = data + PACKET_HEADER_SIZE;
 	return MLSP_OK;
 }
 
-static int mlsp_new_frame(struct mlsp *m, struct mlsp_packet *udp)
+static void mlsp_decode_payload(const struct mlsp *m, const struct mlsp_packet *udp,
+                               struct mlsp_frame *frame)
 {
-	if(m->collected.framenumber && m->collected.packets != m->collected.collected_packets)
-	{
-		fprintf(stderr, "mlsp: ignoring incomplete frame: %d/%d\n", m->collected.collected_packets, m->collected.packets);
-		for(int i=0;i<m->collected.packets;++i)
-			fprintf(stderr, "%d", m->collected.received_packets[i]);
-		fprintf(stderr, "\n");
+	frame->framenumber = m->framenumber;
+
+	for(int i=0;i<m->subframes;++i)
+	{	//note - we accept lower number of subframes from sender then initialized for receiver
+		frame->size[i] = i < udp->subframes ? m->collected[i].actual_size : 0;
+		frame->data[i] = i < udp->subframes ? m->collected[i].data : NULL;
 	}
+}
 
-	m->collected.framenumber = udp->framenumber;
-	m->collected.actual_size = 0;
-	m->collected.packets = udp->packets;
-	m->collected.collected_packets = 0;
-
-	if(m->collected.reserved_size < udp->packets * PACKET_MAX_PAYLOAD)
+static void mlsp_new_frame(struct mlsp *m, uint16_t framenumber)
+{	
+	if(m->framenumber)
+		for(int s=0;s<m->subframes;++m)
+			if(!m->received_subframes[s])
+			{
+				fprintf(stderr, "mlsp: ignoring incomplete frame %d/%d: %d/%d\n", framenumber, s,
+				m->collected[s].collected_packets, m->collected[s].packets);
+				for(int i=0;i<m->collected[s].packets;++i)
+					fprintf(stderr, "%d", m->collected[s].received_packets[i]);
+				fprintf(stderr, "\n");
+			}
+	
+	m->framenumber = framenumber;
+	memset(m->received_subframes, 0, MLSP_MAX_SUBFRAMES);
+	
+	//clear frame and subframes meta-data
+	for(int s=0;s<m->subframes;++s)
 	{
-		free(m->collected.data);
-		if ( (m->collected.data = malloc ( udp->packets * PACKET_MAX_PAYLOAD + BUFFER_PADDING_SIZE ) ) == NULL)
+		m->collected[s].actual_size = 0;
+		m->collected[s].packets = 0;
+		m->collected[s].collected_packets = 0;
+		memset(m->collected[s].received_packets, 0, m->collected[s].received_packets_size);
+	}
+}
+
+static int mlsp_new_subframe(struct mlsp_collected_frame *collected, struct mlsp_packet *udp)
+{	
+	collected->actual_size = 0;
+	collected->packets = udp->packets;
+	collected->collected_packets = 0;
+
+	if(collected->reserved_size < udp->packets * PACKET_MAX_PAYLOAD)
+	{
+		free(collected->data);
+		if ( (collected->data = malloc ( udp->packets * PACKET_MAX_PAYLOAD + BUFFER_PADDING_SIZE ) ) == NULL)
 		{
-			fprintf(stderr, "mlsp: not enough memory for frame\n");
+			fprintf(stderr, "mlsp: not enough memory for subframe\n");
 			return MLSP_ERROR;
 		}
-		m->collected.reserved_size = udp->packets * PACKET_MAX_PAYLOAD;
+		collected->reserved_size = udp->packets * PACKET_MAX_PAYLOAD;
 	}
 
-	if(m->collected.received_packets_size < udp->packets)
+	if(collected->received_packets_size < udp->packets)
 	{
-		free(m->collected.received_packets);
-		if ( (m->collected.received_packets = malloc ( udp->packets) ) == NULL )
+		free(collected->received_packets);
+		if ( (collected->received_packets = malloc ( udp->packets) ) == NULL )
 		{
-			fprintf(stderr, "mlsp: not enough memory for recevied frame packets flags\n");
+			fprintf(stderr, "mlsp: not enough memory for recevied subframe packets flags\n");
 			return MLSP_ERROR;
 		}
-		m->collected.received_packets_size = udp->packets;
+		collected->received_packets_size = udp->packets;
 	}
 
-	memset(m->collected.received_packets, 0, udp->packets);
+	memset(collected->received_packets, 0, udp->packets);
 
 	return MLSP_OK;
 }
 void mlsp_receive_reset(struct mlsp *m)
 {
-	m->collected.framenumber = 0;
-	m->collected.actual_size = 0;
-	m->collected.collected_packets = 0;
-	if(m->collected.received_packets)
-		memset(m->collected.received_packets, 0, m->collected.received_packets_size);
+	m->framenumber = 0;
+	mlsp_new_frame(m, 0);
 }

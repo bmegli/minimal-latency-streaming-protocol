@@ -30,6 +30,7 @@ struct mlsp_config
 	const char *ip; //!< IP (send to or listen on) or NULL and "\0" for server (listen on any)
 	uint16_t port; //!< port to listen on (server) or send to (client)
 	int timeout_ms; //!< 0 or positive number of ms
+	int subframes; //!< number of logical subframes carried by single frame, 0 is treated as 1
 };
 
 enum mlsp_retval_enum
