@@ -346,7 +346,7 @@ static int mlsp_decode_header(struct mlsp *m, int size, struct mlsp_packet *udp)
 		return MLSP_ERROR;
 	}
 	
-	if(udp->subframes >= m->subframes || udp->subframe >= m->subframes)
+	if(udp->subframes > m->subframes || udp->subframe >= m->subframes)
 	{
 		fprintf(stderr, "mlsp: ignoring packet with incorrect subframe(s)\n");
 		return MLSP_ERROR;
