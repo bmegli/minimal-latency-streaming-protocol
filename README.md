@@ -71,7 +71,7 @@ struct mlsp_config streamer_config= {NULL, 9766, 500}; //listen on any, port, 50
 streamer=mlsp_init_server(&streamer_config);
 
 //here we will be getting data
-mlsp_frame *streamer_frame;
+const mlsp_frame *streamer_frame;
 
 while(keep_working)
 {
