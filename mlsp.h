@@ -51,8 +51,7 @@ struct mlsp *mlsp_init_client(const struct mlsp_config *config);
 struct mlsp *mlsp_init_server(const struct mlsp_config *config);
 void mlsp_close(struct mlsp *m);
 
-int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame);
-int mlsp_send_subframe(struct mlsp *m, const struct mlsp_frame *frame, uint8_t subframe);
+int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame, uint8_t subframe);
 
 //non NULL on success, NULL on failure or timeout
 //the ownership of mlsp_packet remains with library

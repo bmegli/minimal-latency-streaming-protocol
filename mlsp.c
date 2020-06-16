@@ -195,16 +195,7 @@ static struct mlsp *mlsp_close_and_return_null(struct mlsp *m)
 	return NULL;
 }
 
-int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame)
-{
-	for(int i = 0;i<m->subframes;++i)
-		if( mlsp_send_subframe(m, &frame[i], i) != MLSP_OK )
-			return MLSP_ERROR;
-
-	return MLSP_OK;
-}
-
-int mlsp_send_subframe(struct mlsp *m, const struct mlsp_frame *frame, uint8_t subframe)
+int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame, uint8_t subframe)
 {
 	const uint8_t *data = frame->data;
 	const uint32_t data_size = frame->size;

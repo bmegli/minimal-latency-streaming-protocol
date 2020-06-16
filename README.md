@@ -52,15 +52,10 @@ while(keep_working)
 	//prepare your data in some way
 	//...
 
-	//each sent frame should be identified with increasing frame number
-	network_frame.framenumber = your_framenumber;
+	network_frame.data = your_data_pointer;
+	network_frame.size = your_data_size;
 
-	//MLSP frame may carry multiple logical subframes
-	//typically only single subframe is used (index 0)
-	network_frame.data[0] = your_data_pointer;
-	network_frame.size[0] = your_data_size;
-
-	mlsp_send(streamer, &frame)
+	mlsp_send(streamer, &frame, 0);
 }
 
 mlsp_close(streamer);
@@ -100,6 +95,11 @@ while(keep_working)
 
 mlsp_close(streamer);
 ```
+
+The same interface with minor changes works for multi-frame streaming:
+- pass number of subframes in `mlsp_config`
+- use `mlsp_send(m, &frame, 0)`, `mlsp_send(m, &frame, 1)`, ...
+- `mlsp_receive` returns array of subframe size
 
 ## Library uses
 
