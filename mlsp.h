@@ -43,7 +43,7 @@ enum mlsp_retval_enum
 //user level logical frame to send
 struct mlsp_frame
 {
-	const uint8_t *data;
+	uint8_t *data;
 	uint32_t size;
 };
 
