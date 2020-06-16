@@ -98,8 +98,8 @@ mlsp_close(streamer);
 
 The same interface with minor changes works for multi-frame streaming:
 - pass number of subframes in `mlsp_config`
+- `mlsp_receive` returns array of subframes size
 - use `mlsp_send(m, &frame, 0)`, `mlsp_send(m, &frame, 1)`, ...
-- `mlsp_receive` returns array of subframe size
 
 ## Library uses
 
