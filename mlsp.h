@@ -56,7 +56,6 @@ int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame, uint8_t subframe);
 //non NULL on success, NULL on failure or timeout
 //the ownership of mlsp_packet remains with library
 const struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error);
-void mlsp_receive_reset(struct mlsp *m);
 
 #ifdef __cplusplus
 }

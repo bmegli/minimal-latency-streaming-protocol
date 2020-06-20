@@ -10,6 +10,7 @@ See [hardware-video-streaming](https://github.com/bmegli/hardware-video-streamin
 - minimize latency
 - no buffering
 - avoid data copies
+- multi-frame streaming (e.g. depth + texture)
 - private experiments
 
 The only buffering that is allowed is natural arising from sequece:
@@ -80,11 +81,7 @@ while(keep_working)
 	if(streamer_frame == NULL)
 	{
 		if(error == MLSP_TIMEOUT)
-		{
-			//accept also new streaming sequence
-			mlsp_receive_reset(streamer);
 			continue;
-		}
 		break; //error
 	}
 	//...
@@ -96,7 +93,7 @@ while(keep_working)
 mlsp_close(streamer);
 ```
 
-The same interface with minor changes works for multi-frame streaming:
+The same interface works for multi-frame streaming:
 - pass number of subframes in `mlsp_config`
 - `mlsp_receive` returns array of subframes size
 - use `mlsp_send(m, &frame, 0)`, `mlsp_send(m, &frame, 1)`, ...

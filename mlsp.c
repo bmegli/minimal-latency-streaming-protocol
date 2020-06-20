@@ -260,7 +260,11 @@ const struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error)
 		if((recv_len = recvfrom(m->socket_udp, m->data, PACKET_MAX_PAYLOAD+PACKET_HEADER_SIZE, 0, NULL, NULL)) == -1)
 		{
 			if(errno==EAGAIN || errno==EWOULDBLOCK || errno==EINPROGRESS)
+			{  //prepare for new streaming sequence on timeout
+				m->framenumber = 0;
+				mlsp_new_frame(m, 0);
 				*error = MLSP_TIMEOUT;
+			}
 			else
 				*error = MLSP_ERROR;
 
@@ -430,9 +434,4 @@ static int mlsp_new_subframe(struct mlsp_collected_frame *collected, struct mlsp
 	memset(collected->received_packets, 0, udp->packets);
 
 	return MLSP_OK;
-}
-void mlsp_receive_reset(struct mlsp *m)
-{
-	m->framenumber = 0;
-	mlsp_new_frame(m, 0);
 }
