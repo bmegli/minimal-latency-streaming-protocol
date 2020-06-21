@@ -379,7 +379,7 @@ static void mlsp_new_frame(struct mlsp *m, uint16_t framenumber)
 {
 	if(m->framenumber)
 		for(int s=0;s<m->subframes;++s)
-			if(!m->transffered_subframes[s])
+			if(!m->transffered_subframes[s] && m->collected[s].packets)
 			{
 				fprintf(stderr, "mlsp: ignoring incomplete frame %d/%d: %d/%d\n", framenumber, s,
 				m->collected[s].collected_packets, m->collected[s].packets);
