@@ -57,6 +57,12 @@ int mlsp_send(struct mlsp *m, const struct mlsp_frame *frame, uint8_t subframe);
 //the ownership of mlsp_packet remains with library
 const struct mlsp_frame *mlsp_receive(struct mlsp *m, int *error);
 
+// get network socket file descriptor
+// library user should not directly read or write from or to descriptor
+// this function is intended to be used in synchronous I/O multiplexing (select, poll)
+// using it makes sense if sent frames are contained in single MTU
+int mlsp_fd(struct mlsp *m);
+
 #ifdef __cplusplus
 }
 #endif

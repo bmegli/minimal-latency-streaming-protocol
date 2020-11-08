@@ -435,3 +435,8 @@ static int mlsp_new_subframe(struct mlsp_collected_frame *collected, struct mlsp
 
 	return MLSP_OK;
 }
+
+int mlsp_fd(struct mlsp* m)
+{
+	return m->socket_udp;
+}
